@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICP-MS 檢量線計算機</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Chart.js 繪製專業檢量線圖表 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 引入 Google Fonts (Inter & Noto Sans TC) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        /* 自訂捲軸樣式 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- 頂部導覽列 -->
+    <header class="bg-slate-900 text-white shadow-md sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-500 p-2 rounded-lg shadow-inner">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight">ICP-MS 檢量線計算機</h1>
+                    <p class="text-xs text-slate-400">Calibration Curve & Sample Quantification Tool</p>
+                </div>
+            </div>
+            
+            <!-- 全域設定與快捷操作 -->
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700">
+                    <label for="elementName" class="text-xs text-slate-400 mr-2">分析元素：</label>
+                    <input type="text" id="elementName" value="Pb (208)" class="bg-transparent text-sm font-semibold text-blue-300 w-20 focus:outline-none border-b border-transparent focus:border-blue-400">
+                </div>
+                <div class="flex items-center bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700">
+                    <label for="unitSelect" class="text-xs text-slate-400 mr-2">濃度單位：</label>
+                    <select id="unitSelect" onchange="calculateAll()" class="bg-slate-800 text-sm font-medium text-white focus:outline-none cursor-pointer">
+                        <option value="µg/L" selected>µg/L (ppb)</option>
+                        <option value="ng/L">ng/L (ppt)</option>
+                        <option value="mg/L">mg/L (ppm)</option>
+                    </select>
+                </div>
+                <button onclick="resetToDefault()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-lg transition flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    重設範例數據
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 提示訊息框 (取代 alert) -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg transform transition-all duration-300 translate-y-20 opacity-0 z-50 flex items-center gap-2 text-sm">
+        <span id="toastIcon">✅</span>
+        <span id="toastMsg">操作成功</span>
+    </div>
+
+    <!-- 主內容區 -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        
+        <!-- 上半部：標準品輸入 + 檢量線圖表與參數 -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- 左側：標準品檢量線設定 (佔 5 欄) -->
+            <div class="lg:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                            1. 標準品配置 (Standards)
+                        </h2>
+                        <button onclick="addStandardRow()" class="text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1">
+                            + 新增標準點
+                        </button>
+                    </div>
+
+                    <!-- 回歸演算法設定 -->
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 mb-4 grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-500 mb-1">加權方式 (Weighting)</label>
+                            <select id="weightingSelect" onchange="calculateAll()" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <option value="none" selected>無加權 (1)</option>
+                                <option value="1/x">1 / x (低濃度優化)</option>
+                                <option value="1/x2">1 / x² (極低濃度優化)</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col justify-center">
+                            <label class="block text-xs font-medium text-slate-500 mb-1">原點設定 (Origin)</label>
+                            <label class="inline-flex items-center cursor-pointer mt-0.5">
+                                <input type="checkbox" id="forceZero" onchange="calculateAll()" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4">
+                                <span class="ml-2 text-xs font-medium text-slate-700">強制過原點 (b = 0)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 標準品表格 -->
+                    <div class="overflow-x-auto max-h-72 overflow-y-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 text-slate-600 text-xs uppercase border-b border-slate-200 sticky top-0">
+                                    <th class="py-2.5 px-3 font-semibold w-12 text-center">啟用</th>
+                                    <th class="py-2.5 px-3 font-semibold">標準濃度 (<span class="unit-label">µg/L</span>)</th>
+                                    <th class="py-2.5 px-3 font-semibold">訊號強度 / 比值</th>
+                                    <th class="py-2.5 px-3 font-semibold text-right">回推誤差%</th>
+                                    <th class="py-2.5 px-2 w-8"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="stdTableBody" class="divide-y divide-slate-100 text-sm">
+                                <!-- 由 JS 動態生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 批次貼上提示 -->
+                <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+                    <span>提示：取消勾選可暫時排除異常標準點</span>
+                    <button onclick="openPasteModal('std')" class="text-blue-600 hover:underline font-medium">從 Excel 貼上數據</button>
+                </div>
+            </div>
+
+            <!-- 右側：回歸結果與圖表 (佔 7 欄) -->
+            <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        2. 檢量線方程式與圖表
+                    </h2>
+                    <span id="r2Badge" class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                        線性良好 (R² ≥ 0.995)
+                    </span>
+                </div>
+
+                <!-- 核心統計卡片 -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                        <div class="text-xs text-slate-500 mb-0.5">回歸方程式</div>
+                        <div id="eqDisplay" class="text-sm font-bold text-slate-800 font-mono truncate" title="y = 0.0800x + 0.0040">y = 0.0800x + 0.0040</div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                        <div class="text-xs text-slate-500 mb-0.5">判定係數 (R²)</div>
+                        <div id="r2Display" class="text-base font-bold text-emerald-600 font-mono">1.00000</div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                        <div class="text-xs text-slate-500 mb-0.5">斜率 (Slope, a)</div>
+                        <div id="slopeDisplay" class="text-sm font-bold text-slate-800 font-mono">0.08000</div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                        <div class="text-xs text-slate-500 mb-0.5">截距 (Intercept, b)</div>
+                        <div id="interceptDisplay" class="text-sm font-bold text-slate-800 font-mono">0.00400</div>
+                    </div>
+                </div>
+
+                <!-- Chart.js 畫布容器 -->
+                <div class="relative flex-grow min-h-[250px] w-full bg-slate-50/50 rounded-xl p-2 border border-slate-100">
+                    <canvas id="calibrationChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下半部：未知樣品計算區 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                        3. 未知樣品濃度計算 (Samples)
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">輸入樣品訊號與稀釋倍數，系統將自動代入檢量線計算原始樣品濃度</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="openPasteModal('sample')" class="text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg transition">
+                        貼上多筆樣品
+                    </button>
+                    <button onclick="copyResults()" class="text-xs font-medium bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-lg transition flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                        複製計算結果
+                    </button>
+                    <button onclick="addSampleRow()" class="text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg shadow-sm transition">
+                        + 新增樣品
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 text-xs uppercase border-b border-slate-200">
+                            <th class="py-3 px-4 font-semibold w-12 text-center">#</th>
+                            <th class="py-3 px-4 font-semibold">樣品名稱 (Sample ID)</th>
+                            <th class="py-3 px-4 font-semibold">測得訊號 (Signal, y)</th>
+                            <th class="py-3 px-4 font-semibold bg-blue-50/50 text-blue-900">上機濃度 (<span class="unit-label">µg/L</span>)</th>
+                            <th class="py-3 px-4 font-semibold w-36">稀釋倍數 (DF)</th>
+                            <th class="py-3 px-4 font-semibold bg-amber-50/70 text-amber-900">最終原始濃度 (<span class="unit-label">µg/L</span>)</th>
+                            <th class="py-3 px-4 font-semibold">狀態檢核</th>
+                            <th class="py-3 px-3 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="sampleTableBody" class="divide-y divide-slate-100 text-sm">
+                        <!-- 由 JS 動態生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- 批次貼上 Modal -->
+    <div id="pasteModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <h3 id="pasteModalTitle" class="text-lg font-bold text-slate-800 mb-2">從 Excel 貼上數據</h3>
+            <p id="pasteModalDesc" class="text-xs text-slate-500 mb-3">請直接從 Excel 複製兩欄數據（濃度 與 訊號）並貼入下方框內，支援 Tab 或逗號分隔：</p>
+            <textarea id="pasteTextarea" rows="6" class="w-full border border-slate-300 rounded-xl p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="0&#9;0.004&#10;1&#9;0.084&#10;5&#9;0.404"></textarea>
+            <div class="mt-4 flex justify-end gap-2">
+                <button onclick="closePasteModal()" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+                <button onclick="processPastedData()" class="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg">匯入數據</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 預設數據 (使用者提供的實際案例)
+        const defaultStandards = [
+            { active: true, conc: 0, signal: 0.004 },
+            { active: true, conc: 1, signal: 0.084 },
+            { active: true, conc: 5, signal: 0.404 },
+            { active: true, conc: 10, signal: 0.804 },
+            { active: true, conc: 50, signal: 4.004 }
+        ];
+
+        const defaultSamples = [
+            { name: '樣品 A', signal: 0.244, df: 10 }
+        ];
+
+        let standards = JSON.parse(JSON.stringify(defaultStandards));
+        let samples = JSON.parse(JSON.stringify(defaultSamples));
+        let chartInstance = null;
+        let currentPasteMode = 'std';
+
+        // 初始化頁面
+        window.onload = function() {
+            renderStandardTable();
+            renderSampleTable();
+            calculateAll();
+        };
+
+        // 顯示 Toast 提示訊息
+        function showToast(msg, icon = '✅') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            document.getElementById('toastIcon').innerText = icon;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 2500);
+        }
+
+        // 重設為預設範例
+        function resetToDefault() {
+            standards = JSON.parse(JSON.stringify(defaultStandards));
+            samples = JSON.parse(JSON.stringify(defaultSamples));
+            document.getElementById('weightingSelect').value = 'none';
+            document.getElementById('forceZero').checked = false;
+            document.getElementById('unitSelect').value = 'µg/L';
+            renderStandardTable();
+            renderSampleTable();
+            calculateAll();
+            showToast('已重設為預設範例數據');
+        }
+
+        // 渲染標準品表格
+        function renderStandardTable() {
+            const tbody = document.getElementById('stdTableBody');
+            tbody.innerHTML = '';
+
+            standards.forEach((std, index) => {
+                const tr = document.createElement('tr');
+                tr.className = std.active ? 'hover:bg-slate-50 transition' : 'bg-slate-50/60 opacity-50 transition';
+                tr.innerHTML = `
+                    <td class="py-2 px-3 text-center">
+                        <input type="checkbox" ${std.active ? 'checked' : ''} onchange="toggleStdActive(${index})" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer">
+                    </td>
+                    <td class="py-2 px-3">
+                        <input type="number" step="any" value="${std.conc}" oninput="updateStd(${index}, 'conc', this.value)" class="w-full bg-white border border-slate-200 rounded-md px-2 py-1 text-sm font-mono focus:border-blue-500 focus:outline-none">
+                    </td>
+                    <td class="py-2 px-3">
+                        <input type="number" step="any" value="${std.signal}" oninput="updateStd(${index}, 'signal', this.value)" class="w-full bg-white border border-slate-200 rounded-md px-2 py-1 text-sm font-mono focus:border-blue-500 focus:outline-none">
+                    </td>
+                    <td class="py-2 px-3 text-right font-mono text-xs" id="std-err-${index}">-</td>
+                    <td class="py-2 px-2 text-center">
+                        <button onclick="removeStandardRow(${index})" class="text-slate-400 hover:text-rose-500 transition p-1" title="刪除此點">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 渲染樣品表格
+        function renderSampleTable() {
+            const tbody = document.getElementById('sampleTableBody');
+            tbody.innerHTML = '';
+
+            samples.forEach((smp, index) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition';
+                tr.innerHTML = `
+                    <td class="py-2.5 px-4 text-center text-xs font-mono text-slate-400">${index + 1}</td>
+                    <td class="py-2.5 px-4">
+                        <input type="text" value="${smp.name}" oninput="updateSample(${index}, 'name', this.value)" class="w-full min-w-[120px] bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-medium focus:border-amber-500 focus:outline-none" placeholder="樣品名稱">
+                    </td>
+                    <td class="py-2.5 px-4">
+                        <input type="number" step="any" value="${smp.signal}" oninput="updateSample(${index}, 'signal', this.value)" class="w-full min-w-[110px] bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:border-amber-500 focus:outline-none" placeholder="輸入訊號">
+                    </td>
+                    <td class="py-2.5 px-4 bg-blue-50/30 font-mono text-sm font-semibold text-blue-700" id="smp-raw-conc-${index}">-</td>
+                    <td class="py-2.5 px-4">
+                        <div class="flex items-center">
+                            <span class="text-xs text-slate-400 mr-1.5">×</span>
+                            <input type="number" step="any" min="0.0001" value="${smp.df}" oninput="updateSample(${index}, 'df', this.value)" class="w-24 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:border-amber-500 focus:outline-none">
+                        </div>
+                    </td>
+                    <td class="py-2.5 px-4 bg-amber-50/40 font-mono text-base font-bold text-amber-700" id="smp-final-conc-${index}">-</td>
+                    <td class="py-2.5 px-4 text-xs" id="smp-status-${index}">-</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <button onclick="removeSampleRow(${index})" class="text-slate-400 hover:text-rose-500 transition p-1" title="刪除樣品">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 操作標準品列
+        function toggleStdActive(index) {
+            standards[index].active = !standards[index].active;
+            renderStandardTable();
+            calculateAll();
+        }
+        function updateStd(index, field, val) {
+            standards[index][field] = parseFloat(val);
+            calculateAll();
+        }
+        function addStandardRow() {
+            const lastConc = standards.length > 0 ? (standards[standards.length - 1].conc || 0) * 2 : 0;
+            standards.push({ active: true, conc: lastConc, signal: 0 });
+            renderStandardTable();
+            calculateAll();
+        }
+        function removeStandardRow(index) {
+            if (standards.length <= 2) {
+                showToast('至少需要保留 2 個標準點', '⚠️');
+                return;
+            }
+            standards.splice(index, 1);
+            renderStandardTable();
+            calculateAll();
+        }
+
+        // 操作樣品列
+        function updateSample(index, field, val) {
+            if (field === 'name') {
+                samples[index].name = val;
+            } else {
+                samples[index][field] = parseFloat(val);
+            }
+            calculateAll();
+        }
+        function addSampleRow() {
+            const nextNum = samples.length + 1;
+            const letter = String.fromCharCode(64 + nextNum);
+            samples.push({ name: `樣品 ${nextNum <= 26 ? letter : nextNum}`, signal: 0, df: 1 });
+            renderSampleTable();
+            calculateAll();
+        }
+        function removeSampleRow(index) {
+            samples.splice(index, 1);
+            renderSampleTable();
+            calculateAll();
+        }
+
+        // 核心數學計算：線性回歸 (支援加權與強制過原點)
+        function calculateLinearRegression(points, weighting, forceZero) {
+            // 過濾有效數據
+            const validPoints = points.filter(p => p.active && !isNaN(p.conc) && !isNaN(p.signal));
+            if (validPoints.length < 2) {
+                return { slope: 0, intercept: 0, r2: 0, valid: false };
+            }
+
+            // 計算權重 w_i
+            // 若濃度為 0，避免除以零，給予最小非零濃度的 1/10 作為權重基準
+            const nonZeroConcs = validPoints.map(p => Math.abs(p.conc)).filter(c => c > 0);
+            const minConc = nonZeroConcs.length > 0 ? Math.min(...nonZeroConcs) : 1;
+
+            const weightedData = validPoints.map(p => {
+                let w = 1;
+                const xEff = Math.abs(p.conc) > 0 ? Math.abs(p.conc) : minConc * 0.1;
+                if (weighting === '1/x') w = 1 / xEff;
+                else if (weighting === '1/x2') w = 1 / (xEff * xEff);
+                return { x: p.conc, y: p.signal, w: w };
+            });
+
+            let slope = 0;
+            let intercept = 0;
+
+            if (forceZero) {
+                // 強制過原點加權回歸: y = a * x
+                let sumWXY = 0;
+                let sumWXX = 0;
+                weightedData.forEach(d => {
+                    sumWXY += d.w * d.x * d.y;
+                    sumWXX += d.w * d.x * d.x;
+                });
+                slope = sumWXX !== 0 ? sumWXY / sumWXX : 0;
+                intercept = 0;
+            } else {
+                // 一般加權線性回歸: y = a * x + b
+                let sumW = 0, sumWX = 0, sumWY = 0, sumWXY = 0, sumWXX = 0;
+                weightedData.forEach(d => {
+                    sumW += d.w;
+                    sumWX += d.w * d.x;
+                    sumWY += d.w * d.y;
+                    sumWXY += d.w * d.x * d.y;
+                    sumWXX += d.w * d.x * d.x;
+                });
+
+                const denom = (sumW * sumWXX - sumWX * sumWX);
+                if (denom !== 0) {
+                    slope = (sumW * sumWXY - sumWX * sumWY) / denom;
+                    intercept = (sumWY - slope * sumWX) / sumW;
+                }
+            }
+
+            // 計算加權判定係數 R²
+            let sumW = 0, sumWY = 0;
+            weightedData.forEach(d => {
+                sumW += d.w;
+                sumWY += d.w * d.y;
+            });
+            const meanY = sumW !== 0 ? sumWY / sumW : 0;
+
+            let ssTot = 0, ssRes = 0;
+            weightedData.forEach(d => {
+                const yPred = slope * d.x + intercept;
+                ssTot += d.w * Math.pow(d.y - meanY, 2);
+                ssRes += d.w * Math.pow(d.y - yPred, 2);
+            });
+
+            let r2 = ssTot !== 0 ? 1 - (ssRes / ssTot) : 1;
+            if (r2 < 0) r2 = 0;
+
+            return { slope, intercept, r2, valid: true, validPoints };
+        }
+
+        // 執行所有計算並更新 UI
+        function calculateAll() {
+            // 更新單位顯示
+            const unit = document.getElementById('unitSelect').value;
+            document.querySelectorAll('.unit-label').forEach(el => el.innerText = unit);
+
+            const weighting = document.getElementById('weightingSelect').value;
+            const forceZero = document.getElementById('forceZero').checked;
+
+            const reg = calculateLinearRegression(standards, weighting, forceZero);
+
+            // 更新統計卡片
+            const eqEl = document.getElementById('eqDisplay');
+            const r2El = document.getElementById('r2Display');
+            const slopeEl = document.getElementById('slopeDisplay');
+            const intEl = document.getElementById('interceptDisplay');
+            const badgeEl = document.getElementById('r2Badge');
+
+            if (!reg.valid || reg.slope === 0) {
+                eqEl.innerText = '數據不足或斜率為 0';
+                r2El.innerText = '-';
+                slopeEl.innerText = '-';
+                intEl.innerText = '-';
+                badgeEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800';
+                badgeEl.innerText = '無法建立檢量線';
+                return;
+            }
+
+            const sign = reg.intercept >= 0 ? '+' : '-';
+            const eqText = `y = ${reg.slope.toFixed(4)}x ${sign} ${Math.abs(reg.intercept).toFixed(4)}`;
+            eqEl.innerText = eqText;
+            eqEl.title = `y = ${reg.slope.toFixed(6)}x ${sign} ${Math.abs(reg.intercept).toFixed(6)}`;
+            
+            r2El.innerText = reg.r2.toFixed(5);
+            slopeEl.innerText = reg.slope.toFixed(5);
+            intEl.innerText = reg.intercept.toFixed(5);
+
+            // R² 狀態燈號
+            if (reg.r2 >= 0.995) {
+                r2El.className = 'text-base font-bold text-emerald-600 font-mono';
+                badgeEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800';
+                badgeEl.innerText = '線性極佳 (R² ≥ 0.995)';
+            } else if (reg.r2 >= 0.990) {
+                r2El.className = 'text-base font-bold text-amber-600 font-mono';
+                badgeEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800';
+                badgeEl.innerText = '線性尚可 (0.990 ≤ R² < 0.995)';
+            } else {
+                r2El.className = 'text-base font-bold text-rose-600 font-mono';
+                badgeEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800';
+                badgeEl.innerText = '線性偏低 (R² < 0.990)';
+            }
+
+            // 計算標準品回推誤差 % (Relative Error)
+            standards.forEach((std, idx) => {
+                const errEl = document.getElementById(`std-err-${idx}`);
+                if (!errEl) return;
+                if (!std.active || isNaN(std.conc) || isNaN(std.signal) || std.conc === 0) {
+                    errEl.innerText = std.conc === 0 ? 'Blank' : '-';
+                    errEl.className = 'py-2 px-3 text-right font-mono text-xs text-slate-400';
+                } else {
+                    const calcConc = (std.signal - reg.intercept) / reg.slope;
+                    const errPct = ((calcConc - std.conc) / std.conc) * 100;
+                    const absErr = Math.abs(errPct);
+                    errEl.innerText = `${errPct >= 0 ? '+' : ''}${errPct.toFixed(1)}%`;
+                    if (absErr <= 10) {
+                        errEl.className = 'py-2 px-3 text-right font-mono text-xs text-emerald-600 font-medium';
+                    } else if (absErr <= 15) {
+                        errEl.className = 'py-2 px-3 text-right font-mono text-xs text-amber-600 font-medium';
+                    } else {
+                        errEl.className = 'py-2 px-3 text-right font-mono text-xs text-rose-600 font-bold';
+                    }
+                }
+            });
+
+            // 計算樣品濃度
+            const maxStdConc = Math.max(...reg.validPoints.map(p => p.conc));
+            const minPosStdConc = Math.min(...reg.validPoints.map(p => p.conc).filter(c => c > 0));
+            const samplePlotPoints = [];
+
+            samples.forEach((smp, idx) => {
+                const rawEl = document.getElementById(`smp-raw-conc-${idx}`);
+                const finalEl = document.getElementById(`smp-final-conc-${idx}`);
+                const statusEl = document.getElementById(`smp-status-${idx}`);
+                if (!rawEl || !finalEl || !statusEl) return;
+
+                if (isNaN(smp.signal) || isNaN(smp.df)) {
+                    rawEl.innerText = '-';
+                    finalEl.innerText = '-';
+                    statusEl.innerHTML = '<span class="text-slate-400">待輸入</span>';
+                    return;
+                }
+
+                // 上機濃度 x = (y - b) / a
+                const rawConc = (smp.signal - reg.intercept) / reg.slope;
+                const finalConc = rawConc * smp.df;
+
+                rawEl.innerText = rawConc.toFixed(3);
+                finalEl.innerText = finalConc.toFixed(3);
+
+                // 狀態判斷 (是否超出檢量線範圍或低於空白)
+                if (rawConc < 0) {
+                    statusEl.innerHTML = '<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">低於空白 (< 0)</span>';
+                } else if (rawConc > maxStdConc) {
+                    statusEl.innerHTML = '<span class="px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">⚠️ 超出最高標準點</span>';
+                } else if (minPosStdConc && rawConc < minPosStdConc) {
+                    statusEl.innerHTML = '<span class="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">低於最低標準點</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">✓ 位於檢量線內</span>';
+                }
+
+                // 加入圖表標示點
+                if (rawConc >= 0) {
+                    samplePlotPoints.push({
+                        x: rawConc,
+                        y: smp.signal,
+                        label: smp.name || `樣品 ${idx + 1}`
+                    });
+                }
+            });
+
+            // 更新圖表
+            updateChart(reg.validPoints, reg.slope, reg.intercept, samplePlotPoints, unit);
+        }
+
+        // 繪製 / 更新 Chart.js 圖表
+        function updateChart(stdPoints, slope, intercept, samplePoints, unit) {
+            const ctx = document.getElementById('calibrationChart').getContext('2d');
+
+            // 找出 X 軸最大值以繪製回歸線
+            const allX = [...stdPoints.map(p => p.conc), ...samplePoints.map(p => p.x)];
+            const maxX = allX.length > 0 ? Math.max(...allX) * 1.05 : 10;
+
+            const lineData = [
+                { x: 0, y: intercept },
+                { x: maxX, y: slope * maxX + intercept }
+            ];
+
+            const scatterStdData = stdPoints.map(p => ({
+                x: p.conc,
+                y: p.signal
+            }));
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: '標準品 (Standards)',
+                            data: scatterStdData,
+                            backgroundColor: '#2563eb',
+                            borderColor: '#1d4ed8',
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            order: 2
+                        },
+                        {
+                            label: '樣品落點 (Samples)',
+                            data: samplePoints,
+                            backgroundColor: '#f59e0b',
+                            borderColor: '#b45309',
+                            pointStyle: 'triangle',
+                            pointRadius: 8,
+                            pointHoverRadius: 10,
+                            order: 1
+                        },
+                        {
+                            label: '線性回歸線 (Fit)',
+                            data: lineData,
+                            type: 'line',
+                            borderColor: '#10b981',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            fill: false,
+                            pointRadius: 0,
+                            tension: 0,
+                            order: 3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'nearest',
+                        intersect: true
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                boxWidth: 8,
+                                font: { size: 11, family: 'Inter, Noto Sans TC' }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                            padding: 10,
+                            callbacks: {
+                                label: function(context) {
+                                    const raw = context.raw;
+                                    const prefix = raw.label ? `[${raw.label}] ` : `${context.dataset.label}: `;
+                                    return `${prefix}濃度 = ${raw.x.toFixed(3)} ${unit}, 訊號 = ${raw.y.toFixed(4)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: `上機濃度 (${unit})`,
+                                font: { size: 12, weight: 'bold' },
+                                color: '#475569'
+                            },
+                            grid: { color: '#e2e8f0' },
+                            beginAtZero: true
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '訊號強度 / 內標比值 (Signal)',
+                                font: { size: 12, weight: 'bold' },
+                                color: '#475569'
+                            },
+                            grid: { color: '#e2e8f0' },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Excel 貼上功能 Modal
+        function openPasteModal(mode) {
+            currentPasteMode = mode;
+            const modal = document.getElementById('pasteModal');
+            const title = document.getElementById('pasteModalTitle');
+            const desc = document.getElementById('pasteModalDesc');
+            const textarea = document.getElementById('pasteTextarea');
+
+            textarea.value = '';
+            if (mode === 'std') {
+                title.innerText = '從 Excel 貼上標準品數據';
+                desc.innerText = '請複製兩欄數據（第1欄：標準濃度，第2欄：訊號強度），貼入下方：';
+                textarea.placeholder = '0\t0.004\n1\t0.084\n5\t0.404\n10\t0.804\n50\t4.004';
+            } else {
+                title.innerText = '從 Excel 貼上樣品數據';
+                desc.innerText = '請複製兩欄或三欄數據（樣品名稱、訊號強度、[選填]稀釋倍數），貼入下方：';
+                textarea.placeholder = '樣品 A\t0.244\t10\n樣品 B\t0.512\t5';
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            textarea.focus();
+        }
+
+        function closePasteModal() {
+            const modal = document.getElementById('pasteModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function processPastedData() {
+            const raw = document.getElementById('pasteTextarea').value.trim();
+            if (!raw) {
+                closePasteModal();
+                return;
+            }
+
+            const lines = raw.split(/\r?\n/);
+            if (currentPasteMode === 'std') {
+                const newStds = [];
+                lines.forEach(line => {
+                    const parts = line.trim().split(/[\t,]+/);
+                    if (parts.length >= 2) {
+                        const c = parseFloat(parts[0]);
+                        const s = parseFloat(parts[1]);
+                        if (!isNaN(c) && !isNaN(s)) {
+                            newStds.push({ active: true, conc: c, signal: s });
+                        }
+                    }
+                });
+                if (newStds.length >= 2) {
+                    standards = newStds;
+                    renderStandardTable();
+                    calculateAll();
+                    showToast(`成功匯入 ${newStds.length} 點標準品數據`);
+                } else {
+                    showToast('格式無法辨識，至少需要 2 組有效數字', '⚠️');
+                }
+            } else {
+                const newSamples = [];
+                lines.forEach((line, i) => {
+                    const parts = line.trim().split(/[\t,]+/);
+                    if (parts.length >= 2) {
+                        const name = parts[0].trim() || `樣品 ${i + 1}`;
+                        const sig = parseFloat(parts[1]);
+                        const df = parts.length >= 3 && !isNaN(parseFloat(parts[2])) ? parseFloat(parts[2]) : 1;
+                        if (!isNaN(sig)) {
+                            newSamples.push({ name, signal: sig, df });
+                        }
+                    }
+                });
+                if (newSamples.length > 0) {
+                    samples = newSamples;
+                    renderSampleTable();
+                    calculateAll();
+                    showToast(`成功匯入 ${newSamples.length} 筆樣品數據`);
+                } else {
+                    showToast('格式無法辨識，請確認包含名稱與訊號數值', '⚠️');
+                }
+            }
+            closePasteModal();
+        }
+
+        // 複製計算結果至剪貼簿 (相容於 iFrame 環境)
+        function copyResults() {
+            const element = document.getElementById('elementName').value;
+            const unit = document.getElementById('unitSelect').value;
+            const eq = document.getElementById('eqDisplay').innerText;
+            const r2 = document.getElementById('r2Display').innerText;
+
+            let output = `ICP-MS 檢量線分析結果 (${element})\n`;
+            output += `檢量線方程式: ${eq} | R² = ${r2}\n`;
+            output += `--------------------------------------------------\n`;
+            output += `樣品名稱\t測得訊號\t上機濃度(${unit})\t稀釋倍數\t最終濃度(${unit})\n`;
+
+            samples.forEach((smp, idx) => {
+                const rawConc = document.getElementById(`smp-raw-conc-${idx}`)?.innerText || '-';
+                const finalConc = document.getElementById(`smp-final-conc-${idx}`)?.innerText || '-';
+                output += `${smp.name}\t${smp.signal}\t${rawConc}\t${smp.df}\t${finalConc}\n`;
+            });
+
+            const tempTextarea = document.createElement('textarea');
+            tempTextarea.value = output;
+            document.body.appendChild(tempTextarea);
+            tempTextarea.select();
+            try {
+                document.execCommand('copy');
+                showToast('計算結果已複製，可直接貼入 Excel！');
+            } catch (err) {
+                showToast('複製失敗，請手動選取複製', '❌');
+            }
+            document.body.removeChild(tempTextarea);
+        }
+    </script>
+</body>
+</html>
